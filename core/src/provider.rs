@@ -5,7 +5,6 @@ use std::{
 
 use ethers::{
     middleware::Middleware,
-    prelude::Log,
     providers::{Http, Provider, ProviderError, RetryClient, RetryClientBuilder},
     types::{Block, BlockNumber, H256, U256, U64},
 };
@@ -15,6 +14,7 @@ use tokio::sync::Mutex;
 use url::Url;
 
 use crate::{event::RindexerEventFilter, manifest::core::Manifest};
+use crate::types::wrapped_log::WrappedLog;
 
 #[derive(Debug)]
 pub struct JsonRpcCachedProvider {
@@ -58,9 +58,10 @@ impl JsonRpcCachedProvider {
         self.provider.get_block_number().await
     }
 
-    pub async fn get_logs(&self, filter: &RindexerEventFilter) -> Result<Vec<Log>, ProviderError> {
-        self.provider.get_logs(filter.raw_filter()).await
-    }
+    pub async fn get_logs(&self, filter: &RindexerEventFilter) -> Result<Vec<WrappedLog>, ProviderError> {
+        self.provider
+            .request("eth_getLogs", [filter.raw_filter()]).await
+   }
 
     pub async fn get_chain_id(&self) -> Result<U256, ProviderError> {
         self.provider.get_chainid().await

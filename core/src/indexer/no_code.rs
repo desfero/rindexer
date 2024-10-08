@@ -178,12 +178,13 @@ fn no_code_callback(params: Arc<NoCodeCallbackParams>) -> EventCallbackType {
             let owned_results: Vec<_> = results
                 .iter()
                 .filter_map(|result| {
-                    let log = parse_log(&params.event, &result.log)?;
+                    let log = parse_log(&params.event, &result.log.clone().into())?;
 
                     let address = result.tx_information.address;
                     let transaction_hash = result.tx_information.transaction_hash;
                     let block_number = result.tx_information.block_number;
                     let block_hash = result.tx_information.block_hash;
+                    let block_timestamp = result.tx_information.block_timestamp;
                     let network = result.tx_information.network.to_string();
                     let transaction_index = result.tx_information.transaction_index;
                     let log_index = result.tx_information.log_index;
@@ -209,6 +210,7 @@ fn no_code_callback(params: Arc<NoCodeCallbackParams>) -> EventCallbackType {
                         transaction_index,
                         block_number,
                         block_hash,
+                        block_timestamp,
                         network,
                         contract_address,
                         event_parameters,
@@ -225,6 +227,7 @@ fn no_code_callback(params: Arc<NoCodeCallbackParams>) -> EventCallbackType {
                 transaction_index,
                 block_number,
                 block_hash,
+                block_timestamp,
                 network,
                 contract_address,
                 event_parameters,
@@ -240,6 +243,7 @@ fn no_code_callback(params: Arc<NoCodeCallbackParams>) -> EventCallbackType {
                             address,
                             block_hash,
                             block_number,
+                            block_timestamp,
                             transaction_hash,
                             log_index,
                             transaction_index,

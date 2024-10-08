@@ -3,7 +3,7 @@ use std::{error::Error, str::FromStr, sync::Arc, time::Duration};
 use ethers::{
     addressbook::Address,
     middleware::MiddlewareError,
-    prelude::{BlockNumber, JsonRpcError, Log, ValueOrArray, H256, U64},
+    prelude::{BlockNumber, JsonRpcError, ValueOrArray, H256, U64},
 };
 use regex::Regex;
 use tokio::{
@@ -18,9 +18,10 @@ use crate::{
     indexer::{log_helpers::is_relevant_block, IndexingEventProgressStatus},
     provider::JsonRpcCachedProvider,
 };
+use crate::types::wrapped_log::WrappedLog;
 
 pub struct FetchLogsResult {
-    pub logs: Vec<Log>,
+    pub logs: Vec<WrappedLog>,
     pub from_block: U64,
     pub to_block: U64,
 }
@@ -243,6 +244,7 @@ async fn fetch_historic_logs_stream(
 
             if let Some(last_log) = last_log {
                 let next_from_block = last_log
+                    .inner
                     .block_number
                     .expect("block number should always be present in a log") +
                     U64::from(1);
@@ -466,7 +468,7 @@ async fn live_indexing_stream(
                                             to_block
                                         );
                                     } else if let Some(last_log) = last_log {
-                                        if let Some(last_log_block_number) = last_log.block_number {
+                                        if let Some(last_log_block_number) = last_log.inner.block_number {
                                             current_filter = current_filter.set_from_block(
                                                 last_log_block_number + U64::from(1),
                                             );
