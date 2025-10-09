@@ -186,6 +186,7 @@ async fn process_contract_events_with_dependencies(
     dependencies: EventDependencies,
     events_processing_config: Arc<Vec<Arc<EventProcessingConfig>>>,
 ) -> Result<(), ProcessContractEventsWithDependenciesError> {
+    let dependencies_clone = dependencies.clone();
     let mut stack = vec![dependencies.tree];
 
     let live_indexing_events =
@@ -219,6 +220,11 @@ async fn process_contract_events_with_dependencies(
                         if event_processing_config.live_indexing() {
                             let network_contract = event_processing_config.network_contract();
 
+                            debug!(
+                                "{} - Processing registering live indexing for event",
+                                event_processing_config.info_log_name(),
+                            );
+
                             let mut live_indexing_events = live_indexing_events.lock().await;
                             let entry = live_indexing_events
                                 .entry(network_contract.network.clone())
@@ -235,6 +241,11 @@ async fn process_contract_events_with_dependencies(
                                 Arc::clone(&event_processing_config),
                                 rindexer_event_filter,
                             ));
+
+                            debug!(
+                                "{} - Processed registering live indexing for event",
+                                event_processing_config.info_log_name(),
+                            );
                         }
 
                         Ok::<(), ProcessContractEventsWithDependenciesError>(())
@@ -261,13 +272,22 @@ async fn process_contract_events_with_dependencies(
             }
         }
 
+        debug!("Processed tree live indexing for event - {:?}", current_tree,);
+
         // If there are more dependencies to process, push the next level onto the stack
         if let Some(next_tree) = &*current_tree.then {
             stack.push(Arc::clone(next_tree));
         }
     }
 
+    debug!(
+        "Finished processing all contract events with dependencies for: {:?}",
+        dependencies_clone
+    );
+
     let live_indexing_events = live_indexing_events.lock().await;
+    debug!("Live indexing count {:?}", live_indexing_events.len());
+
     if live_indexing_events.is_empty() {
         return Ok(());
     }
