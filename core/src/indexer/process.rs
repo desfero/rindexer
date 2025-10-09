@@ -48,9 +48,12 @@ pub enum ProcessEventError {
 pub async fn process_non_blocking_event(
     config: EventProcessingConfig,
 ) -> Result<(), ProcessEventError> {
-    debug!("{} - Processing non blocking event", config.info_log_name());
+    let info_log_name = config.info_log_name();
+    debug!("{} - Processing non blocking event", info_log_name);
 
     process_event_logs(Arc::new(config), false, false).await?;
+
+    debug!("{} - Processing non blocking event", info_log_name);
 
     Ok(())
 }
@@ -60,9 +63,12 @@ pub async fn process_non_blocking_event(
 pub async fn process_blocking_event_historical_data(
     config: Arc<EventProcessingConfig>,
 ) -> Result<(), Box<ProviderError>> {
-    debug!("{} - Processing blocking event historical data", config.info_log_name());
+    let info_log_name = config.info_log_name();
+    debug!("{} - Processing blocking event historical data", info_log_name);
 
     process_event_logs(config, true, true).await?;
+
+    debug!("{} - Processed blocking event historical data", info_log_name);
 
     Ok(())
 }
@@ -624,7 +630,9 @@ async fn handle_logs_result(
 ) -> Result<JoinHandle<()>, Box<dyn std::error::Error + Send>> {
     match result {
         Ok(result) => {
-            debug!("{} - Processing {} logs", config.info_log_name(), result.logs.len());
+            let info_log_name = config.info_log_name();
+            let logs_count = result.logs.len();
+            debug!("{} - Processing {} logs", info_log_name, logs_count);
 
             let fn_data = result
                 .logs
@@ -639,17 +647,21 @@ async fn handle_logs_result(
                 })
                 .collect::<Vec<_>>();
 
-            if let Ok(permit) = callback_permits.clone().acquire_owned().await {
+            let task = if let Ok(permit) = callback_permits.clone().acquire_owned().await {
                 let task = tokio::spawn(async move {
                     trigger_event(config, fn_data, result.to_block).await;
                     drop(permit)
                 });
 
-                Ok(task)
+                task
             } else {
                 trigger_event(config, fn_data, result.to_block).await;
-                Ok(tokio::spawn(async {}))
-            }
+                tokio::spawn(async {})
+            };
+
+            debug!("{} - Processed {} logs", info_log_name, logs_count);
+
+            Ok(task)
         }
         Err(e) => {
             error!(
