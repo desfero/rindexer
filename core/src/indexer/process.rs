@@ -231,6 +231,11 @@ async fn live_indexing_for_contract_event_dependencies<'a>(
         Vec<(Arc<EventProcessingConfig>, RindexerEventFilter)>,
     >,
 ) {
+    println!(
+        "Starting live indexing for contract event dependencies {:?}",
+        live_indexing_events.iter().map(|e| e.0.info_log_name()).collect::<Vec<_>>()
+    );
+
     let mut ordering_live_indexing_details_map: HashMap<
         B256,
         Arc<Mutex<OrderedLiveIndexingDetails>>,
@@ -258,6 +263,11 @@ async fn live_indexing_for_contract_event_dependencies<'a>(
     let target_iteration_duration = Duration::from_millis(200);
 
     loop {
+        println!(
+            "Loop live indexing for contract event dependencies {:?}",
+            live_indexing_events.iter().map(|e| e.0.info_log_name()).collect::<Vec<_>>()
+        );
+
         let iteration_start = Instant::now();
 
         for (config, _) in live_indexing_events.iter() {
@@ -269,6 +279,7 @@ async fn live_indexing_for_contract_event_dependencies<'a>(
                 .clone();
 
             let latest_block = &config.network_contract().cached_provider.get_latest_block().await;
+            println!("Last latest block {:?} {:?}", config.info_log_name(), latest_block);
 
             match latest_block {
                 Ok(latest_block) => {
@@ -276,6 +287,12 @@ async fn live_indexing_for_contract_event_dependencies<'a>(
                         if let Some(latest_block_number) =
                             Some(U64::from(latest_block.header.number))
                         {
+                            println!(
+                                "Event latest block {:?} {:?}, latest block number {:?}",
+                                config.info_log_name(),
+                                ordering_live_indexing_details.last_seen_block_number,
+                                latest_block_number
+                            );
                             if ordering_live_indexing_details.last_seen_block_number
                                 == latest_block_number
                             {
