@@ -1,0 +1,47 @@
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "c7b495c9e2fa5f5a4b8dbe0828aea6968cab38bf",
+  "prompts": {
+    "41bce73b69409ae2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c94924c2-8cc9-40c1-ae32-159554fd7265",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Paweł Lula <desfero@users.noreply.github.com>",
+      "messages": [],
+      "total_additions": 744,
+      "total_deletions": 9,
+      "accepted_lines": 736,
+      "overriden_lines": 0
+    },
+    "51cee657014c586d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "bab387e0-15f5-4006-823b-90f59146522a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Paweł Lula <desfero@users.noreply.github.com>",
+      "messages": [],
+      "total_additions": 1353,
+      "total_deletions": 330,
+      "accepted_lines": 1012,
+      "overriden_lines": 2
+    },
+    "b0589b6e7b7d69cf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a040a121-174d-4ecb-a296-c84e130f86c6",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Paweł Lula <desfero@users.noreply.github.com>",
+      "messages": [],
+      "total_additions": 512,
+      "total_deletions": 8,
+      "accepted_lines": 507,
+      "overriden_lines": 0
+    }
+  }
+}
