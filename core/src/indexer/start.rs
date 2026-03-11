@@ -12,7 +12,6 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
-use super::progress::BlockProgressAggregator;
 use crate::database::clickhouse::client::{ClickhouseClient, ClickhouseConnectionError};
 use crate::event::config::{ContractEventProcessingConfig, FactoryEventProcessingConfig};
 use crate::events::RindexerEventEmitter;
@@ -176,7 +175,7 @@ async fn start_indexing_traces(
     indexer: &Indexer,
     trace_registry: Arc<TraceCallbackRegistry>,
     cancel_token: CancellationToken,
-    block_progress: Option<Arc<BlockProgressAggregator>>,
+    progress: Arc<IndexingEventsProgressState>,
 ) -> Result<Vec<JoinHandle<Result<(), ProcessEventError>>>, StartIndexingError> {
     if !manifest.native_transfers.enabled {
         info!("Native transfer indexing disabled!");
@@ -184,9 +183,6 @@ async fn start_indexing_traces(
     }
 
     let mut non_blocking_process_events = Vec::new();
-    let trace_progress_state =
-        IndexingEventsProgressState::monitor_traces(&trace_registry.events, block_progress.clone())
-            .await;
 
     // Group events by network to create one pipeline per network
     let mut network_events: std::collections::HashMap<
@@ -256,7 +252,7 @@ async fn start_indexing_traces(
             contract_name: NATIVE_TRANSFER_CONTRACT_NAME.to_string(),
             event_name: "TraceEvents".to_string(),
             network: network_name.clone(),
-            progress: trace_progress_state.clone(),
+            progress: progress.clone(),
             postgres: postgres.clone(),
             csv_details: None,
             registry: network_registry,
@@ -300,7 +296,7 @@ async fn start_indexing_contract_events(
     dependencies: &[ContractEventDependencies],
     no_live_indexing_forced: bool,
     cancel_token: CancellationToken,
-    block_progress: Option<Arc<BlockProgressAggregator>>,
+    progress: Arc<IndexingEventsProgressState>,
 ) -> Result<
     (
         Vec<JoinHandle<Result<(), ProcessEventError>>>,
@@ -310,8 +306,6 @@ async fn start_indexing_contract_events(
     ),
     StartIndexingError,
 > {
-    let event_progress_state =
-        IndexingEventsProgressState::monitor_events(&registry.events, block_progress.clone()).await;
 
     let mut apply_cross_contract_dependency_events_config_after_processing = Vec::new();
     let mut non_blocking_process_events = Vec::new();
@@ -339,7 +333,7 @@ async fn start_indexing_contract_events(
             let clickhouse = clickhouse.clone();
             let manifest_csv_details = manifest.storage.csv.clone();
             let registry = Arc::clone(&registry);
-            let event_progress_state = Arc::clone(&event_progress_state);
+            let progress = Arc::clone(&progress);
             let dependencies = dependencies.to_vec();
 
             block_tasks.push(async move {
@@ -378,7 +372,7 @@ async fn start_indexing_contract_events(
                         clickhouse,
                         manifest_csv_details,
                         registry,
-                        event_progress_state,
+                        progress,
                         no_live_indexing_forced,
                         dependencies,
                     )
@@ -398,7 +392,7 @@ async fn start_indexing_contract_events(
             clickhouse,
             manifest_csv_details,
             registry,
-            event_progress_state,
+            progress,
             no_live_indexing_forced,
             dependencies,
         ) = res?;
@@ -450,7 +444,7 @@ async fn start_indexing_contract_events(
                     start_block,
                     end_block,
                     registry: Arc::clone(&registry),
-                    progress: Arc::clone(&event_progress_state),
+                    progress: Arc::clone(&progress),
                     clickhouse: clickhouse.clone(),
                     postgres: postgres.clone(),
                     config: manifest.config.clone(),
@@ -483,7 +477,7 @@ async fn start_indexing_contract_events(
                 start_block,
                 end_block,
                 registry: Arc::clone(&registry),
-                progress: Arc::clone(&event_progress_state),
+                progress: Arc::clone(&progress),
                 postgres: postgres.clone(),
                 clickhouse: clickhouse.clone(),
                 csv_details: manifest_csv_details.clone(),
@@ -618,12 +612,17 @@ async fn start_indexing(
     let database = initialize_database(manifest).await?;
     let clickhouse = initialize_clickhouse(manifest).await?;
 
-    let block_progress = event_emitter.map(|e| Arc::new(BlockProgressAggregator::new(e)));
-
     // any events which are non-blocking and can be fired in parallel
     let mut non_blocking_process_events = Vec::new();
 
     let indexer = manifest.to_indexer();
+
+    let progress = IndexingEventsProgressState::monitor(
+        &registry.events,
+        &trace_registry.events,
+        event_emitter,
+    )
+    .await;
 
     // Start the sub-indexers concurrently to ensure fast startup times
     let (trace_indexer_handles, contract_events_indexer) = join!(
@@ -635,8 +634,7 @@ async fn start_indexing(
             &indexer,
             trace_registry.clone(),
             cancel_token.clone(),
-            trace_registry.clone(),
-            block_progress.clone(),
+            progress.clone(),
         ),
         start_indexing_contract_events(
             manifest,
@@ -648,7 +646,7 @@ async fn start_indexing(
             dependencies,
             no_live_indexing_forced,
             cancel_token.clone(),
-            block_progress.clone(),
+            progress.clone(),
         )
     );
 

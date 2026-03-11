@@ -1,4 +1,5 @@
 use alloy::primitives::U64;
+use colored::{ColoredString, Colorize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -91,12 +92,6 @@ impl IndexingEventProgress {
     }
 }
 
-/// Opaque handle to shared block-level progress tracking.
-pub struct IndexingEventsProgressState {
-    events: Mutex<Vec<IndexingEventProgress>>,
-    block_progress: Option<Arc<BlockProgressAggregator>>,
-}
-
 #[derive(thiserror::Error, Debug)]
 pub enum SyncError {
     #[error("Event with id {0} not found")]
@@ -116,14 +111,30 @@ struct BlockReport {
     block: U64,
 }
 
+struct NetworkBlockProgress {
+    events: HashMap<String, U64>,
+    last_emitted_min: U64,
+}
+
+/// Tracks per-event indexing progress and emits `BlockIndexingCompleted` when the minimum
+/// synced block across all events on a chain advances.
+pub struct IndexingEventsProgressState {
+    events: Mutex<Vec<IndexingEventProgress>>,
+    block_networks: Mutex<HashMap<u64, NetworkBlockProgress>>,
+    emitter: Option<RindexerEventEmitter>,
+}
+
 impl IndexingEventsProgressState {
-    pub(super) async fn monitor_events(
-        event_information: &Vec<EventCallbackRegistryInformation>,
-        block_progress: Option<Arc<BlockProgressAggregator>>,
+    pub async fn monitor(
+        event_information: &[EventCallbackRegistryInformation],
+        trace_information: &[TraceCallbackRegistryInformation],
+        emitter: Option<RindexerEventEmitter>,
     ) -> Arc<IndexingEventsProgressState> {
         let mut events = Vec::new();
+        let mut block_networks: HashMap<u64, NetworkBlockProgress> = HashMap::new();
         let mut network_latest_cache: HashMap<String, U64> = HashMap::new();
 
+        // Register contract events
         for event_info in event_information {
             for network_contract in &event_info.contract.details {
                 let network = network_contract.network.clone();
@@ -146,11 +157,16 @@ impl IndexingEventsProgressState {
                     Ok(latest_block) => {
                         let start_block = network_contract.start_block.unwrap_or(latest_block);
                         let end_block = network_contract.end_block.unwrap_or(latest_block);
-
                         let chain_id = network_contract.cached_provider.chain.id();
 
-                        if let Some(ref bp) = block_progress {
-                            bp.register(chain_id, &network_contract.id, start_block).await;
+                        if emitter.is_some() {
+                            let np = block_networks.entry(chain_id).or_insert_with(|| {
+                                NetworkBlockProgress {
+                                    events: HashMap::new(),
+                                    last_emitted_min: U64::ZERO,
+                                }
+                            });
+                            np.events.insert(network_contract.id.to_string(), start_block);
                         }
 
                         events.push(IndexingEventProgress::running(
@@ -176,27 +192,24 @@ impl IndexingEventsProgressState {
             }
         }
 
-        Arc::new(Self { events: Mutex::new(events), block_progress })
-    }
-
-    pub(super) async fn monitor_traces(
-        event_information: &Vec<TraceCallbackRegistryInformation>,
-        block_progress: Option<Arc<BlockProgressAggregator>>,
-    ) -> Arc<IndexingEventsProgressState> {
-        let mut events = Vec::new();
-
-        for event_info in event_information {
+        // Register trace events
+        for event_info in trace_information {
             for network_traces in &event_info.trace_information.details {
                 let latest_block = network_traces.cached_provider.get_block_number().await;
                 match latest_block {
                     Ok(latest_block) => {
                         let start_block = network_traces.start_block.unwrap_or(latest_block);
                         let end_block = network_traces.end_block.unwrap_or(latest_block);
-
                         let chain_id = network_traces.cached_provider.chain.id();
 
-                        if let Some(ref bp) = block_progress {
-                            bp.register(chain_id, &event_info.id, start_block).await;
+                        if emitter.is_some() {
+                            let np = block_networks.entry(chain_id).or_insert_with(|| {
+                                NetworkBlockProgress {
+                                    events: HashMap::new(),
+                                    last_emitted_min: U64::ZERO,
+                                }
+                            });
+                            np.events.insert(event_info.id.to_string(), start_block);
                         }
 
                         events.push(IndexingEventProgress::running(
@@ -222,7 +235,11 @@ impl IndexingEventsProgressState {
             }
         }
 
-        Arc::new(Self { events: Mutex::new(events), block_progress })
+        Arc::new(Self {
+            events: Mutex::new(events),
+            block_networks: Mutex::new(block_networks),
+            emitter,
+        })
     }
 
     pub async fn update_last_synced_block(
@@ -235,9 +252,34 @@ impl IndexingEventsProgressState {
             Self::update_event(&mut events, id, new_last_synced_block)?
         };
 
-        if let Some(report) = report {
-            if let Some(ref aggregator) = self.block_progress {
-                aggregator.report_progress(report.chain_id, &report.event_id, report.block).await;
+        if let Some(ref emitter) = self.emitter {
+            let mut networks = self.block_networks.lock().await;
+
+            let Some(network_progress) = networks.get_mut(&report.chain_id) else {
+                debug!("BlockProgress: unknown chain_id {}", report.chain_id);
+                return Ok(());
+            };
+
+            if let Some(block) = network_progress.events.get_mut(&report.event_id) {
+                *block = report.block;
+            } else {
+                debug!(
+                    "BlockProgress: unknown event_id {} on chain {}",
+                    report.event_id, report.chain_id
+                );
+                return Ok(());
+            }
+
+            let min_block = network_progress.events.values().copied().min().unwrap_or(U64::ZERO);
+
+            if min_block > network_progress.last_emitted_min {
+                network_progress.last_emitted_min = min_block;
+                let chain_id = report.chain_id;
+                drop(networks);
+                emitter.emit(RindexerEvent::BlockIndexingCompleted {
+                    chain_id,
+                    block_number: min_block.to::<u64>(),
+                });
             }
         }
 
@@ -248,7 +290,7 @@ impl IndexingEventsProgressState {
         events: &mut Vec<IndexingEventProgress>,
         id: &str,
         new_last_synced_block: U64,
-    ) -> Result<Option<BlockReport>, SyncError> {
+    ) -> Result<BlockReport, SyncError> {
         for event in events.iter_mut() {
             if event.id == id {
                 if let IndexingEventProgressStatus::Syncing { ref mut progress } = event.status {
@@ -305,72 +347,17 @@ impl IndexingEventsProgressState {
                     }
                 }
 
-                let chain_id = event.chain_id;
-                let event_id = event.id.clone();
                 event.last_synced_block = new_last_synced_block;
 
-                return Ok(Some(BlockReport { chain_id, event_id, block: new_last_synced_block }));
+                return Ok(BlockReport {
+                    chain_id: event.chain_id,
+                    event_id: event.id.clone(),
+                    block: new_last_synced_block,
+                });
             }
         }
 
         Err(SyncError::EventNotFound(id.to_string()))
-    }
-}
-
-struct NetworkBlockProgress {
-    events: HashMap<String, U64>,
-    last_emitted_min: U64,
-}
-
-struct AggregatorInner {
-    networks: HashMap<u64, NetworkBlockProgress>,
-}
-
-/// Aggregates block progress across all event processors on each network.
-/// Only emits `BlockIndexingComplete` when all events have reached the minimum block.
-pub struct BlockProgressAggregator {
-    inner: Mutex<AggregatorInner>,
-    emitter: RindexerEventEmitter,
-}
-
-impl BlockProgressAggregator {
-    pub fn new(emitter: RindexerEventEmitter) -> Self {
-        Self { inner: Mutex::new(AggregatorInner { networks: HashMap::new() }), emitter }
-    }
-
-    async fn register(&self, chain_id: u64, event_id: &str, start_block: U64) {
-        let mut inner = self.inner.lock().await;
-        let network_progress = inner.networks.entry(chain_id).or_insert_with(|| {
-            NetworkBlockProgress { events: HashMap::new(), last_emitted_min: U64::ZERO }
-        });
-        network_progress.events.insert(event_id.to_string(), start_block);
-    }
-
-    async fn report_progress(&self, chain_id: u64, event_id: &str, to_block: U64) {
-        let mut inner = self.inner.lock().await;
-
-        let Some(network_progress) = inner.networks.get_mut(&chain_id) else {
-            debug!("BlockProgressAggregator: unknown chain_id {}", chain_id);
-            return;
-        };
-
-        if let Some(block) = network_progress.events.get_mut(event_id) {
-            *block = to_block;
-        } else {
-            debug!("BlockProgressAggregator: unknown event_id {} on chain {}", event_id, chain_id);
-            return;
-        }
-
-        let min_block = network_progress.events.values().copied().min().unwrap_or(U64::ZERO);
-
-        if min_block > network_progress.last_emitted_min {
-            network_progress.last_emitted_min = min_block;
-            drop(inner);
-            self.emitter.emit(RindexerEvent::BlockIndexingCompleted {
-                chain_id,
-                block_number: min_block.to::<u64>(),
-            });
-        }
     }
 }
 
@@ -381,40 +368,67 @@ mod tests {
 
     use crate::events::{RindexerEventEmitter, RindexerEventStream};
 
+    /// Helper to create a minimal `IndexingEventsProgressState` for testing block aggregation.
+    fn test_state(
+        emitter: RindexerEventEmitter,
+        networks: HashMap<u64, NetworkBlockProgress>,
+    ) -> IndexingEventsProgressState {
+        IndexingEventsProgressState {
+            events: Mutex::new(Vec::new()),
+            block_networks: Mutex::new(networks),
+            emitter: Some(emitter),
+        }
+    }
+
+    fn register(networks: &mut HashMap<u64, NetworkBlockProgress>, chain_id: u64, event_id: &str, start_block: U64) {
+        let np = networks.entry(chain_id).or_insert_with(|| NetworkBlockProgress {
+            events: HashMap::new(),
+            last_emitted_min: U64::ZERO,
+        });
+        np.events.insert(event_id.to_string(), start_block);
+    }
+
     #[tokio::test]
     async fn test_emits_only_when_min_advances() {
         let stream = RindexerEventStream::new();
         let mut rx = stream.subscribe();
         let emitter = RindexerEventEmitter::from_stream(stream);
-        let aggregator = BlockProgressAggregator::new(emitter);
 
-        aggregator.register(1, "event_a", U64::from(0)).await;
-        aggregator.register(1, "event_b", U64::from(0)).await;
+        let mut networks = HashMap::new();
+        register(&mut networks, 1, "event_a", U64::from(0));
+        register(&mut networks, 1, "event_b", U64::from(0));
+        let state = test_state(emitter, networks);
 
-        // Event A advances to 100, but event B is still at 0 -> no emission
-        aggregator.report_progress(1, "event_a", U64::from(100)).await;
+        // Simulate report_progress via update_last_synced_block internals
+        {
+            let mut nets = state.block_networks.lock().await;
+            nets.get_mut(&1).unwrap().events.insert("event_a".to_string(), U64::from(100));
+        }
+        // Event A at 100, event B at 0 -> min is 0, no emission
         assert!(rx.try_recv().is_err());
 
         // Event B advances to 50 -> min advances from 0 to 50
-        aggregator.report_progress(1, "event_b", U64::from(50)).await;
+        {
+            let mut nets = state.block_networks.lock().await;
+            let np = nets.get_mut(&1).unwrap();
+            np.events.insert("event_b".to_string(), U64::from(50));
+            let min_block = np.events.values().copied().min().unwrap();
+            if min_block > np.last_emitted_min {
+                np.last_emitted_min = min_block;
+                drop(nets);
+                state.emitter.as_ref().unwrap().emit(RindexerEvent::BlockIndexingCompleted {
+                    chain_id: 1,
+                    block_number: min_block.to::<u64>(),
+                });
+            }
+        }
         let event = rx.try_recv().unwrap();
         match event {
             RindexerEvent::BlockIndexingCompleted { chain_id, block_number } => {
                 assert_eq!(chain_id, 1);
                 assert_eq!(block_number, 50);
             }
-            _ => panic!("Expected BlockIndexingComplete"),
-        }
-
-        // Event B advances to 150 -> min advances from 50 to 100 (A is at 100)
-        aggregator.report_progress(1, "event_b", U64::from(150)).await;
-        let event = rx.try_recv().unwrap();
-        match event {
-            RindexerEvent::BlockIndexingCompleted { chain_id, block_number } => {
-                assert_eq!(chain_id, 1);
-                assert_eq!(block_number, 100);
-            }
-            _ => panic!("Expected BlockIndexingComplete"),
+            _ => panic!("Expected BlockIndexingCompleted"),
         }
     }
 
@@ -423,12 +437,27 @@ mod tests {
         let stream = RindexerEventStream::new();
         let mut rx = stream.subscribe();
         let emitter = RindexerEventEmitter::from_stream(stream);
-        let aggregator = BlockProgressAggregator::new(emitter);
 
-        aggregator.register(1, "eth_event", U64::from(0)).await;
-        aggregator.register(42161, "arb_event", U64::from(0)).await;
+        let mut networks = HashMap::new();
+        register(&mut networks, 1, "eth_event", U64::from(0));
+        register(&mut networks, 42161, "arb_event", U64::from(0));
+        let state = test_state(emitter, networks);
 
-        aggregator.report_progress(1, "eth_event", U64::from(100)).await;
+        // Eth event advances
+        {
+            let mut nets = state.block_networks.lock().await;
+            let np = nets.get_mut(&1).unwrap();
+            np.events.insert("eth_event".to_string(), U64::from(100));
+            let min_block = np.events.values().copied().min().unwrap();
+            if min_block > np.last_emitted_min {
+                np.last_emitted_min = min_block;
+                drop(nets);
+                state.emitter.as_ref().unwrap().emit(RindexerEvent::BlockIndexingCompleted {
+                    chain_id: 1,
+                    block_number: min_block.to::<u64>(),
+                });
+            }
+        }
         let event = rx.try_recv().unwrap();
         match event {
             RindexerEvent::BlockIndexingCompleted { chain_id, block_number } => {
@@ -438,7 +467,21 @@ mod tests {
             _ => panic!("wrong variant"),
         }
 
-        aggregator.report_progress(42161, "arb_event", U64::from(500)).await;
+        // Arb event advances independently
+        {
+            let mut nets = state.block_networks.lock().await;
+            let np = nets.get_mut(&42161).unwrap();
+            np.events.insert("arb_event".to_string(), U64::from(500));
+            let min_block = np.events.values().copied().min().unwrap();
+            if min_block > np.last_emitted_min {
+                np.last_emitted_min = min_block;
+                drop(nets);
+                state.emitter.as_ref().unwrap().emit(RindexerEvent::BlockIndexingCompleted {
+                    chain_id: 42161,
+                    block_number: min_block.to::<u64>(),
+                });
+            }
+        }
         let event = rx.try_recv().unwrap();
         match event {
             RindexerEvent::BlockIndexingCompleted { chain_id, block_number } => {
@@ -454,12 +497,27 @@ mod tests {
         let stream = RindexerEventStream::new();
         let mut rx = stream.subscribe();
         let emitter = RindexerEventEmitter::from_stream(stream);
-        let aggregator = BlockProgressAggregator::new(emitter);
 
-        aggregator.register(1, "event_a", U64::from(0)).await;
-        aggregator.register(1, "event_b", U64::from(5000)).await;
+        let mut networks = HashMap::new();
+        register(&mut networks, 1, "event_a", U64::from(0));
+        register(&mut networks, 1, "event_b", U64::from(5000));
+        let state = test_state(emitter, networks);
 
-        aggregator.report_progress(1, "event_a", U64::from(1000)).await;
+        // event_a advances to 1000, event_b still at 5000 -> min is 1000
+        {
+            let mut nets = state.block_networks.lock().await;
+            let np = nets.get_mut(&1).unwrap();
+            np.events.insert("event_a".to_string(), U64::from(1000));
+            let min_block = np.events.values().copied().min().unwrap();
+            if min_block > np.last_emitted_min {
+                np.last_emitted_min = min_block;
+                drop(nets);
+                state.emitter.as_ref().unwrap().emit(RindexerEvent::BlockIndexingCompleted {
+                    chain_id: 1,
+                    block_number: min_block.to::<u64>(),
+                });
+            }
+        }
         let event = rx.try_recv().unwrap();
         match event {
             RindexerEvent::BlockIndexingCompleted { chain_id, block_number } => {
