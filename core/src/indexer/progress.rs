@@ -1,6 +1,6 @@
 use alloy::primitives::U64;
 use colored::{ColoredString, Colorize};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info};
@@ -11,29 +11,15 @@ use crate::event::callback_registry::{
 use crate::events::RindexerEventEmitter;
 use crate::RindexerEvent;
 
-/// Progress is stored as basis points (0–10000) representing 0.00%–100.00%.
 #[derive(Clone, Debug, Hash)]
 pub enum IndexingEventProgressStatus {
-    Syncing { progress: u16 },
+    Syncing { progress: u16, syncing_to_block: U64 },
     Live,
     Completed,
     Failed,
 }
 
 impl IndexingEventProgressStatus {
-    fn as_str(&self) -> &str {
-        match self {
-            Self::Syncing { .. } => "SYNCING",
-            Self::Live => "LIVE",
-            Self::Completed => "COMPLETED",
-            Self::Failed => "FAILED",
-        }
-    }
-
-    pub fn log(&self) -> &str {
-        self.as_str()
-    }
-
     pub fn syncing_log() -> ColoredString {
         "SYNCING".green()
     }
@@ -54,7 +40,6 @@ pub struct IndexingEventProgress {
     pub event_name: String,
     pub starting_block: U64,
     pub last_synced_block: U64,
-    pub syncing_to_block: U64,
     pub network: String,
     pub chain_id: u64,
     pub live_indexing: bool,
@@ -82,11 +67,10 @@ impl IndexingEventProgress {
             event_name,
             starting_block,
             last_synced_block,
-            syncing_to_block,
             network,
             chain_id,
             live_indexing,
-            status: IndexingEventProgressStatus::Syncing { progress: 0 },
+            status: IndexingEventProgressStatus::Syncing { progress: 0, syncing_to_block },
             info_log,
         }
     }
@@ -133,6 +117,7 @@ impl IndexingEventsProgressState {
         let mut events = Vec::new();
         let mut block_networks: HashMap<u64, NetworkBlockProgress> = HashMap::new();
         let mut network_latest_cache: HashMap<String, U64> = HashMap::new();
+        let mut seen_trace_networks: HashSet<String> = HashSet::new();
 
         // Register contract events
         for event_info in event_information {
@@ -193,36 +178,48 @@ impl IndexingEventsProgressState {
         }
 
         // Register trace events
-        for event_info in trace_information {
-            for network_traces in &event_info.trace_information.details {
+        for trace_info in trace_information {
+            for network_traces in &trace_info.trace_information.details {
+                if !seen_trace_networks.insert(network_traces.network.clone()) {
+                    continue;
+                }
+
                 let latest_block = network_traces.cached_provider.get_block_number().await;
                 match latest_block {
                     Ok(latest_block) => {
                         let start_block = network_traces.start_block.unwrap_or(latest_block);
                         let end_block = network_traces.end_block.unwrap_or(latest_block);
                         let chain_id = network_traces.cached_provider.chain.id();
+                        let syncing_to_block =
+                            if latest_block > end_block { end_block } else { latest_block };
 
+                        // Trace indexing runs one shared pipeline per network, so progress uses
+                        // the first event ID for that network, matching `start_indexing_traces`.
                         if emitter.is_some() {
-                            let np = block_networks.entry(chain_id).or_insert_with(|| {
-                                NetworkBlockProgress {
-                                    events: HashMap::new(),
-                                    last_emitted_min: U64::ZERO,
-                                }
-                            });
-                            np.events.insert(event_info.id.to_string(), start_block);
+                            let network_progress =
+                                block_networks.entry(chain_id).or_insert_with(|| {
+                                    NetworkBlockProgress {
+                                        events: HashMap::new(),
+                                        last_emitted_min: U64::ZERO,
+                                    }
+                                });
+                            network_progress
+                                .events
+                                .entry(trace_info.id.clone())
+                                .or_insert(start_block);
                         }
 
                         events.push(IndexingEventProgress::running(
-                            event_info.id.to_string(),
-                            event_info.contract_name.clone(),
-                            event_info.event_name.to_string(),
+                            trace_info.id.clone(),
+                            trace_info.contract_name.clone(),
+                            trace_info.event_name.clone(),
                             start_block,
                             start_block,
-                            if latest_block > end_block { end_block } else { latest_block },
+                            syncing_to_block,
                             network_traces.network.clone(),
                             chain_id,
                             network_traces.end_block.is_none(),
-                            event_info.info_log_name(),
+                            trace_info.info_log_name(),
                         ));
                     }
                     Err(e) => {
@@ -286,7 +283,6 @@ impl IndexingEventsProgressState {
 
         Ok(())
     }
-
     fn update_event(
         events: &mut Vec<IndexingEventProgress>,
         chain_id: u64,
@@ -295,20 +291,22 @@ impl IndexingEventsProgressState {
     ) -> Result<BlockReport, SyncError> {
         for event in events.iter_mut() {
             if event.id == id && event.chain_id == chain_id {
-                if let IndexingEventProgressStatus::Syncing { ref mut progress } = event.status {
+                if let IndexingEventProgressStatus::Syncing { progress, syncing_to_block } =
+                    &mut event.status
+                {
+                    let syncing_to_block = *syncing_to_block;
                     if *progress < 10_000 {
-                        if event.syncing_to_block > event.last_synced_block {
-                            let total_blocks: u64 = event
-                                .syncing_to_block
+                        if syncing_to_block > event.last_synced_block {
+                            let total_blocks: u64 = syncing_to_block
                                 .checked_sub(event.starting_block)
                                 .ok_or(SyncError::BlockNumberConversionTotalBlocksError(
-                                    event.syncing_to_block,
+                                    syncing_to_block,
                                     event.starting_block,
                                 ))?
                                 .try_into()
                                 .map_err(|_| {
                                     SyncError::BlockNumberConversionTotalBlocksError(
-                                        event.syncing_to_block,
+                                        syncing_to_block,
                                         event.starting_block,
                                     )
                                 })?;
@@ -327,11 +325,11 @@ impl IndexingEventsProgressState {
                                     )
                                 })?;
 
-                            *progress =
-                                ((blocks_synced * 10_000 / total_blocks) as u16).min(10_000);
+                            *progress = (blocks_synced.saturating_mul(10_000) / total_blocks)
+                                .min(10_000) as u16;
                         }
 
-                        if new_last_synced_block >= event.syncing_to_block {
+                        if new_last_synced_block >= syncing_to_block {
                             info!("{}::{} - 100.00% progress", event.info_log, event.network,);
                             event.status = if event.live_indexing {
                                 IndexingEventProgressStatus::Live
@@ -370,29 +368,56 @@ mod tests {
 
     use crate::events::{RindexerEventEmitter, RindexerEventStream};
 
-    /// Helper to create a minimal `IndexingEventsProgressState` for testing block aggregation.
-    fn test_state(
+    /// Helper: build an `IndexingEventsProgressState` with both `events` and
+    /// `block_networks` populated so that `update_last_synced_block` exercises
+    /// the full event-update → block-progress → emission path.
+    fn test_state_with_events(
         emitter: RindexerEventEmitter,
-        networks: HashMap<u64, NetworkBlockProgress>,
+        event_defs: Vec<(&str, u64, U64, U64)>, // (id, chain_id, start_block, syncing_to_block)
     ) -> IndexingEventsProgressState {
+        let mut events = Vec::new();
+        let mut block_networks: HashMap<u64, NetworkBlockProgress> = HashMap::new();
+
+        for (id, chain_id, start_block, syncing_to_block) in &event_defs {
+            events.push(IndexingEventProgress::running(
+                id.to_string(),
+                "Contract".to_string(),
+                id.to_string(),
+                *start_block,
+                *start_block,
+                *syncing_to_block,
+                format!("chain_{chain_id}"),
+                *chain_id,
+                false,
+                format!("Contract::{id}"),
+            ));
+            let np = block_networks.entry(*chain_id).or_insert_with(|| NetworkBlockProgress {
+                events: HashMap::new(),
+                last_emitted_min: U64::ZERO,
+            });
+            np.events.insert(id.to_string(), *start_block);
+        }
+
         IndexingEventsProgressState {
-            events: Mutex::new(Vec::new()),
-            block_networks: Mutex::new(networks),
+            events: Mutex::new(events),
+            block_networks: Mutex::new(block_networks),
             emitter: Some(emitter),
         }
     }
 
-    fn register(
-        networks: &mut HashMap<u64, NetworkBlockProgress>,
-        chain_id: u64,
-        event_id: &str,
-        start_block: U64,
+    fn assert_block_event(
+        rx: &mut tokio::sync::broadcast::Receiver<RindexerEvent>,
+        expected_chain_id: u64,
+        expected_block: u64,
     ) {
-        let np = networks.entry(chain_id).or_insert_with(|| NetworkBlockProgress {
-            events: HashMap::new(),
-            last_emitted_min: U64::ZERO,
-        });
-        np.events.insert(event_id.to_string(), start_block);
+        let event = rx.try_recv().expect("expected a BlockIndexingCompleted event");
+        match event {
+            RindexerEvent::BlockIndexingCompleted { chain_id, block_number } => {
+                assert_eq!(chain_id, expected_chain_id);
+                assert_eq!(block_number, expected_block);
+            }
+            _ => panic!("Expected BlockIndexingCompleted"),
+        }
     }
 
     #[tokio::test]
@@ -401,42 +426,21 @@ mod tests {
         let mut rx = stream.subscribe();
         let emitter = RindexerEventEmitter::from_stream(stream);
 
-        let mut networks = HashMap::new();
-        register(&mut networks, 1, "event_a", U64::from(0));
-        register(&mut networks, 1, "event_b", U64::from(0));
-        let state = test_state(emitter, networks);
+        let state = test_state_with_events(
+            emitter,
+            vec![
+                ("event_a", 1, U64::from(0), U64::from(200)),
+                ("event_b", 1, U64::from(0), U64::from(200)),
+            ],
+        );
 
-        // Simulate report_progress via update_last_synced_block internals
-        {
-            let mut nets = state.block_networks.lock().await;
-            nets.get_mut(&1).unwrap().events.insert("event_a".to_string(), U64::from(100));
-        }
-        // Event A at 100, event B at 0 -> min is 0, no emission
+        // Event A advances to 100, event B still at 0 -> min is 0, no emission
+        state.update_last_synced_block(1, "event_a", U64::from(100)).await.unwrap();
         assert!(rx.try_recv().is_err());
 
         // Event B advances to 50 -> min advances from 0 to 50
-        {
-            let mut nets = state.block_networks.lock().await;
-            let np = nets.get_mut(&1).unwrap();
-            np.events.insert("event_b".to_string(), U64::from(50));
-            let min_block = np.events.values().copied().min().unwrap();
-            if min_block > np.last_emitted_min {
-                np.last_emitted_min = min_block;
-                drop(nets);
-                state.emitter.as_ref().unwrap().emit(RindexerEvent::BlockIndexingCompleted {
-                    chain_id: 1,
-                    block_number: min_block.to::<u64>(),
-                });
-            }
-        }
-        let event = rx.try_recv().unwrap();
-        match event {
-            RindexerEvent::BlockIndexingCompleted { chain_id, block_number } => {
-                assert_eq!(chain_id, 1);
-                assert_eq!(block_number, 50);
-            }
-            _ => panic!("Expected BlockIndexingCompleted"),
-        }
+        state.update_last_synced_block(1, "event_b", U64::from(50)).await.unwrap();
+        assert_block_event(&mut rx, 1, 50);
     }
 
     #[tokio::test]
@@ -445,58 +449,21 @@ mod tests {
         let mut rx = stream.subscribe();
         let emitter = RindexerEventEmitter::from_stream(stream);
 
-        let mut networks = HashMap::new();
-        register(&mut networks, 1, "eth_event", U64::from(0));
-        register(&mut networks, 42161, "arb_event", U64::from(0));
-        let state = test_state(emitter, networks);
+        let state = test_state_with_events(
+            emitter,
+            vec![
+                ("eth_event", 1, U64::from(0), U64::from(200)),
+                ("arb_event", 42161, U64::from(0), U64::from(1000)),
+            ],
+        );
 
-        // Eth event advances
-        {
-            let mut nets = state.block_networks.lock().await;
-            let np = nets.get_mut(&1).unwrap();
-            np.events.insert("eth_event".to_string(), U64::from(100));
-            let min_block = np.events.values().copied().min().unwrap();
-            if min_block > np.last_emitted_min {
-                np.last_emitted_min = min_block;
-                drop(nets);
-                state.emitter.as_ref().unwrap().emit(RindexerEvent::BlockIndexingCompleted {
-                    chain_id: 1,
-                    block_number: min_block.to::<u64>(),
-                });
-            }
-        }
-        let event = rx.try_recv().unwrap();
-        match event {
-            RindexerEvent::BlockIndexingCompleted { chain_id, block_number } => {
-                assert_eq!(chain_id, 1);
-                assert_eq!(block_number, 100);
-            }
-            _ => panic!("wrong variant"),
-        }
+        // Eth event advances -> single event on chain 1, so min advances immediately
+        state.update_last_synced_block(1, "eth_event", U64::from(100)).await.unwrap();
+        assert_block_event(&mut rx, 1, 100);
 
         // Arb event advances independently
-        {
-            let mut nets = state.block_networks.lock().await;
-            let np = nets.get_mut(&42161).unwrap();
-            np.events.insert("arb_event".to_string(), U64::from(500));
-            let min_block = np.events.values().copied().min().unwrap();
-            if min_block > np.last_emitted_min {
-                np.last_emitted_min = min_block;
-                drop(nets);
-                state.emitter.as_ref().unwrap().emit(RindexerEvent::BlockIndexingCompleted {
-                    chain_id: 42161,
-                    block_number: min_block.to::<u64>(),
-                });
-            }
-        }
-        let event = rx.try_recv().unwrap();
-        match event {
-            RindexerEvent::BlockIndexingCompleted { chain_id, block_number } => {
-                assert_eq!(chain_id, 42161);
-                assert_eq!(block_number, 500);
-            }
-            _ => panic!("wrong variant"),
-        }
+        state.update_last_synced_block(42161, "arb_event", U64::from(500)).await.unwrap();
+        assert_block_event(&mut rx, 42161, 500);
     }
 
     #[tokio::test]
@@ -505,34 +472,17 @@ mod tests {
         let mut rx = stream.subscribe();
         let emitter = RindexerEventEmitter::from_stream(stream);
 
-        let mut networks = HashMap::new();
-        register(&mut networks, 1, "event_a", U64::from(0));
-        register(&mut networks, 1, "event_b", U64::from(5000));
-        let state = test_state(emitter, networks);
+        let state = test_state_with_events(
+            emitter,
+            vec![
+                ("event_a", 1, U64::from(0), U64::from(10000)),
+                ("event_b", 1, U64::from(5000), U64::from(10000)),
+            ],
+        );
 
         // event_a advances to 1000, event_b still at 5000 -> min is 1000
-        {
-            let mut nets = state.block_networks.lock().await;
-            let np = nets.get_mut(&1).unwrap();
-            np.events.insert("event_a".to_string(), U64::from(1000));
-            let min_block = np.events.values().copied().min().unwrap();
-            if min_block > np.last_emitted_min {
-                np.last_emitted_min = min_block;
-                drop(nets);
-                state.emitter.as_ref().unwrap().emit(RindexerEvent::BlockIndexingCompleted {
-                    chain_id: 1,
-                    block_number: min_block.to::<u64>(),
-                });
-            }
-        }
-        let event = rx.try_recv().unwrap();
-        match event {
-            RindexerEvent::BlockIndexingCompleted { chain_id, block_number } => {
-                assert_eq!(chain_id, 1);
-                assert_eq!(block_number, 1000);
-            }
-            _ => panic!("wrong variant"),
-        }
+        state.update_last_synced_block(1, "event_a", U64::from(1000)).await.unwrap();
+        assert_block_event(&mut rx, 1, 1000);
     }
 
     #[tokio::test]
@@ -541,58 +491,56 @@ mod tests {
         let mut rx = stream.subscribe();
         let emitter = RindexerEventEmitter::from_stream(stream);
 
-        let state = IndexingEventsProgressState {
-            events: Mutex::new(vec![
-                IndexingEventProgress::running(
-                    "event_a".to_string(),
-                    "Contract".to_string(),
-                    "Transfer".to_string(),
-                    U64::from(0),
-                    U64::from(0),
-                    U64::from(100),
-                    "mainnet".to_string(),
-                    1,
-                    true,
-                    "Contract::Transfer".to_string(),
-                ),
-                IndexingEventProgress::running(
-                    "event_b".to_string(),
-                    "Contract".to_string(),
-                    "Approval".to_string(),
-                    U64::from(0),
-                    U64::from(0),
-                    U64::from(100),
-                    "mainnet".to_string(),
-                    1,
-                    true,
-                    "Contract::Approval".to_string(),
-                ),
-            ]),
-            block_networks: Mutex::new(HashMap::from([(
-                1,
-                NetworkBlockProgress {
-                    events: HashMap::from([
-                        ("event_a".to_string(), U64::from(0)),
-                        ("event_b".to_string(), U64::from(0)),
-                    ]),
-                    last_emitted_min: U64::ZERO,
-                },
-            )])),
-            emitter: Some(emitter),
-        };
+        let state = test_state_with_events(
+            emitter,
+            vec![
+                ("event_a", 1, U64::from(0), U64::from(100)),
+                ("event_b", 1, U64::from(0), U64::from(100)),
+            ],
+        );
 
+        // Only event_a at 100, event_b still at 0 -> no emission
         state.update_last_synced_block(1, "event_a", U64::from(100)).await.unwrap();
         assert!(rx.try_recv().is_err());
 
+        // Both at 100 -> min advances to 100
         state.update_last_synced_block(1, "event_b", U64::from(100)).await.unwrap();
+        assert_block_event(&mut rx, 1, 100);
+    }
 
-        let event = rx.try_recv().unwrap();
-        match event {
-            RindexerEvent::BlockIndexingCompleted { chain_id, block_number } => {
-                assert_eq!(chain_id, 1);
-                assert_eq!(block_number, 100);
-            }
-            _ => panic!("wrong variant"),
+    #[test]
+    fn test_trace_progress_uses_first_event_id_per_network() {
+        let mut events = Vec::new();
+        let mut block_networks = HashMap::new();
+        let processor_id = "event_a".to_string();
+
+        let network_progress = block_networks.entry(1).or_insert_with(|| NetworkBlockProgress {
+            events: HashMap::new(),
+            last_emitted_min: U64::ZERO,
+        });
+        network_progress.events.entry(processor_id.clone()).or_insert(U64::from(10));
+
+        if !events.iter().any(|event| event.id == processor_id && event.chain_id == 1) {
+            events.push(IndexingEventProgress::running(
+                processor_id.clone(),
+                "EvmTraces".to_string(),
+                "TraceEvents".to_string(),
+                U64::from(10),
+                U64::from(10),
+                U64::from(100),
+                "mainnet".to_string(),
+                1,
+                true,
+                "Indexer::TraceEvents".to_string(),
+            ));
         }
+
+        network_progress.events.entry(processor_id.clone()).or_insert(U64::from(10));
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].id, processor_id);
+        assert_eq!(block_networks.len(), 1);
+        assert_eq!(block_networks.get(&1).unwrap().events.len(), 1);
+        assert_eq!(block_networks.get(&1).unwrap().events.get(&processor_id), Some(&U64::from(10)));
     }
 }

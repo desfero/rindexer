@@ -225,7 +225,7 @@ impl EventProcessingConfig {
 
     pub fn info_log_name(&self) -> String {
         match self {
-            Self::ContractEventProcessing(config) => config.info_log_name().clone(),
+            Self::ContractEventProcessing(config) => config.info_log_name(),
             Self::FactoryEventProcessing(config) => config.info_log_name(),
         }
     }

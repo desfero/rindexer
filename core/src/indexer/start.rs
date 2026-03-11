@@ -307,7 +307,6 @@ async fn start_indexing_contract_events(
     ),
     StartIndexingError,
 > {
-
     let mut apply_cross_contract_dependency_events_config_after_processing = Vec::new();
     let mut non_blocking_process_events = Vec::new();
     let mut processed_network_contracts: Vec<ProcessedNetworkContract> = Vec::new();
