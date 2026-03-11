@@ -37,7 +37,7 @@ pub struct ContractEventProcessingConfig {
     pub start_block: U64,
     pub end_block: U64,
     pub registry: Arc<EventCallbackRegistry>,
-    pub progress: Arc<Mutex<IndexingEventsProgressState>>,
+    pub progress: Arc<IndexingEventsProgressState>,
     pub postgres: Option<Arc<PostgresClient>>,
     pub clickhouse: Option<Arc<ClickhouseClient>>,
     pub csv_details: Option<CsvDetails>,
@@ -115,7 +115,7 @@ pub struct FactoryEventProcessingConfig {
     pub start_block: U64,
     pub end_block: U64,
     pub registry: Arc<EventCallbackRegistry>,
-    pub progress: Arc<Mutex<IndexingEventsProgressState>>,
+    pub progress: Arc<IndexingEventsProgressState>,
     pub postgres: Option<Arc<PostgresClient>>,
     pub clickhouse: Option<Arc<ClickhouseClient>>,
     pub csv_details: Option<CsvDetails>,
@@ -280,7 +280,7 @@ impl EventProcessingConfig {
         }
     }
 
-    pub fn progress(&self) -> Arc<Mutex<IndexingEventsProgressState>> {
+    pub fn progress(&self) -> Arc<IndexingEventsProgressState> {
         match self {
             Self::ContractEventProcessing(config) => config.progress.clone(),
             Self::FactoryEventProcessing(config) => config.progress.clone(),
@@ -358,7 +358,7 @@ pub struct TraceProcessingConfig {
     pub contract_name: String,
     pub event_name: String,
     pub network: String,
-    pub progress: Arc<Mutex<IndexingEventsProgressState>>,
+    pub progress: Arc<IndexingEventsProgressState>,
     pub postgres: Option<Arc<PostgresClient>>,
     pub csv_details: Option<CsvDetails>,
     pub registry: Arc<TraceCallbackRegistry>,

@@ -12,6 +12,7 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
+use super::progress::BlockProgressAggregator;
 use crate::database::clickhouse::client::{ClickhouseClient, ClickhouseConnectionError};
 use crate::event::config::{ContractEventProcessingConfig, FactoryEventProcessingConfig};
 use crate::events::RindexerEventEmitter;
@@ -175,6 +176,7 @@ async fn start_indexing_traces(
     indexer: &Indexer,
     trace_registry: Arc<TraceCallbackRegistry>,
     cancel_token: CancellationToken,
+    block_progress: Option<Arc<BlockProgressAggregator>>,
 ) -> Result<Vec<JoinHandle<Result<(), ProcessEventError>>>, StartIndexingError> {
     if !manifest.native_transfers.enabled {
         info!("Native transfer indexing disabled!");
@@ -183,7 +185,8 @@ async fn start_indexing_traces(
 
     let mut non_blocking_process_events = Vec::new();
     let trace_progress_state =
-        IndexingEventsProgressState::monitor_traces(&trace_registry.events).await;
+        IndexingEventsProgressState::monitor_traces(&trace_registry.events, block_progress.clone())
+            .await;
 
     // Group events by network to create one pipeline per network
     let mut network_events: std::collections::HashMap<
@@ -297,6 +300,7 @@ async fn start_indexing_contract_events(
     dependencies: &[ContractEventDependencies],
     no_live_indexing_forced: bool,
     cancel_token: CancellationToken,
+    block_progress: Option<Arc<BlockProgressAggregator>>,
 ) -> Result<
     (
         Vec<JoinHandle<Result<(), ProcessEventError>>>,
@@ -306,7 +310,8 @@ async fn start_indexing_contract_events(
     ),
     StartIndexingError,
 > {
-    let event_progress_state = IndexingEventsProgressState::monitor(&registry.events).await;
+    let event_progress_state =
+        IndexingEventsProgressState::monitor_events(&registry.events, block_progress.clone()).await;
 
     let mut apply_cross_contract_dependency_events_config_after_processing = Vec::new();
     let mut non_blocking_process_events = Vec::new();
@@ -561,6 +566,7 @@ pub async fn start_historical_indexing(
         registry,
         trace_registry,
         cancel_token,
+        event_emitter.clone(),
     )
     .await?;
 
@@ -582,6 +588,7 @@ pub async fn start_live_indexing(
     registry: Arc<EventCallbackRegistry>,
     trace_registry: Arc<TraceCallbackRegistry>,
     cancel_token: CancellationToken,
+    event_emitter: Option<RindexerEventEmitter>,
 ) -> Result<Vec<ProcessedNetworkContract>, StartIndexingError> {
     info!("Live indexing started");
 
@@ -593,6 +600,7 @@ pub async fn start_live_indexing(
         registry,
         trace_registry,
         cancel_token,
+        event_emitter,
     )
     .await
 }
@@ -605,9 +613,12 @@ async fn start_indexing(
     registry: Arc<EventCallbackRegistry>,
     trace_registry: Arc<TraceCallbackRegistry>,
     cancel_token: CancellationToken,
+    event_emitter: Option<RindexerEventEmitter>,
 ) -> Result<Vec<ProcessedNetworkContract>, StartIndexingError> {
     let database = initialize_database(manifest).await?;
     let clickhouse = initialize_clickhouse(manifest).await?;
+
+    let block_progress = event_emitter.map(|e| Arc::new(BlockProgressAggregator::new(e)));
 
     // any events which are non-blocking and can be fired in parallel
     let mut non_blocking_process_events = Vec::new();
@@ -624,6 +635,8 @@ async fn start_indexing(
             &indexer,
             trace_registry.clone(),
             cancel_token.clone(),
+            trace_registry.clone(),
+            block_progress.clone(),
         ),
         start_indexing_contract_events(
             manifest,
@@ -635,6 +648,7 @@ async fn start_indexing(
             dependencies,
             no_live_indexing_forced,
             cancel_token.clone(),
+            block_progress.clone(),
         )
     );
 

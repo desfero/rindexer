@@ -376,7 +376,7 @@ async fn live_indexing_for_contract_event_dependencies(
                 debug!(
                     "{} - {} - No new blocks to process...",
                     &config.info_log_name(),
-                    IndexingEventProgressStatus::Live.log()
+                    IndexingEventProgressStatus::live_log()
                 );
                 if ordering_live_indexing_details.last_no_new_block_log_time.elapsed()
                     >= log_no_new_block_interval
@@ -384,7 +384,7 @@ async fn live_indexing_for_contract_event_dependencies(
                     info!(
                         "{} - {} - No new blocks published in the last 5 minutes - latest block number {}",
                         &config.info_log_name(),
-                        IndexingEventProgressStatus::Live.log(),
+                        IndexingEventProgressStatus::live_log(),
                         latest_block_number
                     );
                     ordering_live_indexing_details.last_no_new_block_log_time = Instant::now();
@@ -399,7 +399,7 @@ async fn live_indexing_for_contract_event_dependencies(
             debug!(
                 "{} - {} - New block seen {} - Last seen block {}",
                 &config.info_log_name(),
-                IndexingEventProgressStatus::Live.log(),
+                IndexingEventProgressStatus::live_log(),
                 latest_block_number,
                 ordering_live_indexing_details.last_seen_block_number
             );
@@ -420,7 +420,7 @@ async fn live_indexing_for_contract_event_dependencies(
                         error!(
                             "{} - {} - RPC has gone back on latest block: rpc returned {}, last seen: {}",
                             &config.info_log_name(),
-                            IndexingEventProgressStatus::Live.log(),
+                            IndexingEventProgressStatus::live_log(),
                             latest_block_number,
                             from_block
                         );
@@ -428,7 +428,7 @@ async fn live_indexing_for_contract_event_dependencies(
                         info!(
                             "{} - {} - RPC has gone back on latest block: rpc returned {}, last seen: {}",
                             &config.info_log_name(),
-                            IndexingEventProgressStatus::Live.log(),
+                            IndexingEventProgressStatus::live_log(),
                             latest_block_number,
                             from_block
                         );
@@ -439,7 +439,7 @@ async fn live_indexing_for_contract_event_dependencies(
                     info!(
                         "{} - {} - not in safe reorg block range yet block: {} > range: {}",
                         &config.info_log_name(),
-                        IndexingEventProgressStatus::Live.log(),
+                        IndexingEventProgressStatus::live_log(),
                         from_block,
                         safe_block_number
                     );
@@ -459,13 +459,13 @@ async fn live_indexing_for_contract_event_dependencies(
                 debug!(
                     "{} - {} - Skipping block {} as it's not relevant",
                     &config.info_log_name(),
-                    IndexingEventProgressStatus::Live.log(),
+                    IndexingEventProgressStatus::live_log(),
                     from_block
                 );
                 debug!(
                     "{} - {} - Did not need to hit RPC as no events in {} block - LogsBloom for block checked",
                     &config.info_log_name(),
-                    IndexingEventProgressStatus::Live.log(),
+                    IndexingEventProgressStatus::live_log(),
                     from_block
                 );
 
@@ -487,7 +487,7 @@ async fn live_indexing_for_contract_event_dependencies(
             debug!(
                 "{} - {} - Processing live filter: {:?}",
                 &config.info_log_name(),
-                IndexingEventProgressStatus::Live.log(),
+                IndexingEventProgressStatus::live_log(),
                 ordering_live_indexing_details.filter
             );
 
@@ -496,7 +496,7 @@ async fn live_indexing_for_contract_event_dependencies(
                     debug!(
                         "{} - {} - Live id {} topic_id {}, Logs: {} from {} to {}",
                         &config.info_log_name(),
-                        IndexingEventProgressStatus::Live.log(),
+                        IndexingEventProgressStatus::live_log(),
                         &config.id(),
                         &config.topic_id(),
                         logs.len(),
@@ -507,7 +507,7 @@ async fn live_indexing_for_contract_event_dependencies(
                     debug!(
                         "{} - {} - Fetched {} event logs - blocks: {} - {}",
                         &config.info_log_name(),
-                        IndexingEventProgressStatus::Live.log(),
+                        IndexingEventProgressStatus::live_log(),
                         logs.len(),
                         from_block,
                         to_block
@@ -533,7 +533,7 @@ async fn live_indexing_for_contract_event_dependencies(
                                 error!(
                                     "{} - {} - Error indexing task: {} - will try again in 200ms",
                                     &config.info_log_name(),
-                                    IndexingEventProgressStatus::Live.log(),
+                                    IndexingEventProgressStatus::live_log(),
                                     e
                                 );
                                 break;
@@ -547,7 +547,7 @@ async fn live_indexing_for_contract_event_dependencies(
                                 debug!(
                                     "{} - {} - No events found between blocks {} - {}",
                                     &config.info_log_name(),
-                                    IndexingEventProgressStatus::Live.log(),
+                                    IndexingEventProgressStatus::live_log(),
                                     from_block,
                                     to_block
                                 );
@@ -572,7 +572,7 @@ async fn live_indexing_for_contract_event_dependencies(
                             error!(
                                 "{} - {} - Error fetching logs: {} - will try again in 200ms",
                                 &config.info_log_name(),
-                                IndexingEventProgressStatus::Live.log(),
+                                IndexingEventProgressStatus::live_log(),
                                 err
                             );
                             break;
@@ -583,7 +583,7 @@ async fn live_indexing_for_contract_event_dependencies(
                     error!(
                         "{} - {} - Error fetching logs: {} - will try again in 200ms",
                         &config.info_log_name(),
-                        IndexingEventProgressStatus::Live.log(),
+                        IndexingEventProgressStatus::live_log(),
                         err
                     );
                     break;
@@ -677,7 +677,7 @@ async fn handle_logs_result(
                 "[{}] - {} - {} - Error fetching logs: {}",
                 config.network_contract().network,
                 config.event_name(),
-                IndexingEventProgressStatus::Live.log(),
+                IndexingEventProgressStatus::live_log(),
                 e
             );
             Err(e)

@@ -271,13 +271,15 @@ pub async fn start_rindexer(details: StartDetails<'_>) -> Result<(), StartRindex
                 // to trigger a graceful reload. Without --watch, this token is never cancelled.
                 let cancel_token = CancellationToken::new();
 
+                let event_emitter = indexing_details.event_stream.map(RindexerEventEmitter::from_stream);
+
                 let processed_network_contracts = start_historical_indexing(
                     &manifest,
                     project_path,
                     &dependencies,
                     indexing_details.registry.complete(),
                     indexing_details.trace_registry.complete(),
-                    indexing_details.event_stream.map(RindexerEventEmitter::from_stream),
+                    event_emitter.clone(),
                     cancel_token.clone(),
                 )
                 .await?;
@@ -340,6 +342,7 @@ pub async fn start_rindexer(details: StartDetails<'_>) -> Result<(), StartRindex
                             .reapply_after_historic(processed_network_contracts),
                         indexing_details.trace_registry.complete(),
                         cancel_token.clone(),
+                        event_emitter,
                     )
                     .await
                     .map_err(StartRindexerError::CouldNotStartIndexing)?;
