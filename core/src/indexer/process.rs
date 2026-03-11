@@ -313,7 +313,7 @@ async fn live_indexing_for_contract_event_dependencies(
         filter = filter.set_from_block(next_block_number).set_to_block(next_block_number);
 
         ordering_live_indexing_details_map.insert(
-            config.id(),
+            config.processor_id(),
             Arc::new(Mutex::new(OrderedLiveIndexingDetails {
                 filter,
                 last_seen_block_number,
@@ -366,7 +366,7 @@ async fn live_indexing_for_contract_event_dependencies(
 
         for (config, _) in events.iter() {
             let mut ordering_live_indexing_details = ordering_live_indexing_details_map
-                .get(&config.id())
+                .get(&config.processor_id())
                 .expect("Failed to get ordering_live_indexing_details_map")
                 .lock()
                 .await
@@ -389,7 +389,7 @@ async fn live_indexing_for_contract_event_dependencies(
                     );
                     ordering_live_indexing_details.last_no_new_block_log_time = Instant::now();
                     *ordering_live_indexing_details_map
-                        .get(&config.id())
+                        .get(&config.processor_id())
                         .expect("Failed to get ordering_live_indexing_details_map")
                         .lock()
                         .await = ordering_live_indexing_details;
@@ -474,7 +474,7 @@ async fn live_indexing_for_contract_event_dependencies(
 
                 ordering_live_indexing_details.last_seen_block_number = to_block;
                 *ordering_live_indexing_details_map
-                    .get(&config.id())
+                    .get(&config.processor_id())
                     .expect("Failed to get ordering_live_indexing_details_map")
                     .lock()
                     .await = ordering_live_indexing_details;
@@ -497,7 +497,7 @@ async fn live_indexing_for_contract_event_dependencies(
                         "{} - {} - Live id {} topic_id {}, Logs: {} from {} to {}",
                         &config.info_log_name(),
                         IndexingEventProgressStatus::live_log(),
-                        &config.id(),
+                        &config.processor_id(),
                         &config.topic_id(),
                         logs.len(),
                         from_block,
@@ -563,7 +563,7 @@ async fn live_indexing_for_contract_event_dependencies(
                             }
 
                             *ordering_live_indexing_details_map
-                                .get(&config.id())
+                                .get(&config.processor_id())
                                 .expect("Failed to get ordering_live_indexing_details_map")
                                 .lock()
                                 .await = ordering_live_indexing_details;

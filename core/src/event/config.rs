@@ -200,7 +200,7 @@ impl EventProcessingConfig {
         }
     }
 
-    pub fn id(&self) -> B256 {
+    pub fn processor_id(&self) -> B256 {
         let topic_id = self.topic_id();
         let contract_name = self.contract_name();
         let network = self.network_contract().network.to_string();
@@ -255,6 +255,13 @@ impl EventProcessingConfig {
         match self {
             Self::ContractEventProcessing(config) => config.indexer_name.clone(),
             Self::FactoryEventProcessing(config) => config.indexer_name.clone(),
+        }
+    }
+
+    pub fn id(&self) -> &str {
+        match self {
+            Self::ContractEventProcessing(config) => &config.id,
+            Self::FactoryEventProcessing(config) => &config.id,
         }
     }
 
@@ -350,6 +357,7 @@ impl EventProcessingConfig {
 #[derive(Clone)]
 pub struct TraceProcessingConfig {
     pub id: String,
+    pub chain_id: u64,
     pub project_path: PathBuf,
     pub start_block: U64,
     pub end_block: U64,

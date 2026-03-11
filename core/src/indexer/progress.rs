@@ -166,11 +166,11 @@ impl IndexingEventsProgressState {
                                     last_emitted_min: U64::ZERO,
                                 }
                             });
-                            np.events.insert(network_contract.id.to_string(), start_block);
+                            np.events.insert(event_info.id.to_string(), start_block);
                         }
 
                         events.push(IndexingEventProgress::running(
-                            network_contract.id.to_string(),
+                            event_info.id.to_string(),
                             event_info.contract.name.clone(),
                             event_info.event_name.to_string(),
                             start_block,
@@ -244,12 +244,13 @@ impl IndexingEventsProgressState {
 
     pub async fn update_last_synced_block(
         &self,
+        chain_id: u64,
         id: &str,
         new_last_synced_block: U64,
     ) -> Result<(), SyncError> {
         let report = {
             let mut events = self.events.lock().await;
-            Self::update_event(&mut events, id, new_last_synced_block)?
+            Self::update_event(&mut events, chain_id, id, new_last_synced_block)?
         };
 
         if let Some(ref emitter) = self.emitter {
@@ -288,11 +289,12 @@ impl IndexingEventsProgressState {
 
     fn update_event(
         events: &mut Vec<IndexingEventProgress>,
+        chain_id: u64,
         id: &str,
         new_last_synced_block: U64,
     ) -> Result<BlockReport, SyncError> {
         for event in events.iter_mut() {
-            if event.id == id {
+            if event.id == id && event.chain_id == chain_id {
                 if let IndexingEventProgressStatus::Syncing { ref mut progress } = event.status {
                     if *progress < 10_000 {
                         if event.syncing_to_block > event.last_synced_block {
@@ -357,7 +359,7 @@ impl IndexingEventsProgressState {
             }
         }
 
-        Err(SyncError::EventNotFound(id.to_string()))
+        Err(SyncError::EventNotFound(format!("{chain_id}::{id}")))
     }
 }
 
@@ -380,7 +382,12 @@ mod tests {
         }
     }
 
-    fn register(networks: &mut HashMap<u64, NetworkBlockProgress>, chain_id: u64, event_id: &str, start_block: U64) {
+    fn register(
+        networks: &mut HashMap<u64, NetworkBlockProgress>,
+        chain_id: u64,
+        event_id: &str,
+        start_block: U64,
+    ) {
         let np = networks.entry(chain_id).or_insert_with(|| NetworkBlockProgress {
             events: HashMap::new(),
             last_emitted_min: U64::ZERO,
@@ -523,6 +530,67 @@ mod tests {
             RindexerEvent::BlockIndexingCompleted { chain_id, block_number } => {
                 assert_eq!(chain_id, 1);
                 assert_eq!(block_number, 1000);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_same_network_contract_tracks_events_separately() {
+        let stream = RindexerEventStream::new();
+        let mut rx = stream.subscribe();
+        let emitter = RindexerEventEmitter::from_stream(stream);
+
+        let state = IndexingEventsProgressState {
+            events: Mutex::new(vec![
+                IndexingEventProgress::running(
+                    "event_a".to_string(),
+                    "Contract".to_string(),
+                    "Transfer".to_string(),
+                    U64::from(0),
+                    U64::from(0),
+                    U64::from(100),
+                    "mainnet".to_string(),
+                    1,
+                    true,
+                    "Contract::Transfer".to_string(),
+                ),
+                IndexingEventProgress::running(
+                    "event_b".to_string(),
+                    "Contract".to_string(),
+                    "Approval".to_string(),
+                    U64::from(0),
+                    U64::from(0),
+                    U64::from(100),
+                    "mainnet".to_string(),
+                    1,
+                    true,
+                    "Contract::Approval".to_string(),
+                ),
+            ]),
+            block_networks: Mutex::new(HashMap::from([(
+                1,
+                NetworkBlockProgress {
+                    events: HashMap::from([
+                        ("event_a".to_string(), U64::from(0)),
+                        ("event_b".to_string(), U64::from(0)),
+                    ]),
+                    last_emitted_min: U64::ZERO,
+                },
+            )])),
+            emitter: Some(emitter),
+        };
+
+        state.update_last_synced_block(1, "event_a", U64::from(100)).await.unwrap();
+        assert!(rx.try_recv().is_err());
+
+        state.update_last_synced_block(1, "event_b", U64::from(100)).await.unwrap();
+
+        let event = rx.try_recv().unwrap();
+        match event {
+            RindexerEvent::BlockIndexingCompleted { chain_id, block_number } => {
+                assert_eq!(chain_id, 1);
+                assert_eq!(block_number, 100);
             }
             _ => panic!("wrong variant"),
         }

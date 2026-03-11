@@ -271,7 +271,8 @@ pub async fn start_rindexer(details: StartDetails<'_>) -> Result<(), StartRindex
                 // to trigger a graceful reload. Without --watch, this token is never cancelled.
                 let cancel_token = CancellationToken::new();
 
-                let event_emitter = indexing_details.event_stream.map(RindexerEventEmitter::from_stream);
+                let event_emitter =
+                    indexing_details.event_stream.map(RindexerEventEmitter::from_stream);
 
                 let processed_network_contracts = start_historical_indexing(
                     &manifest,

@@ -245,6 +245,7 @@ async fn start_indexing_traces(
 
         let config = Arc::new(TraceProcessingConfig {
             id: first_event.id.clone(), // Use the first event's ID for progress tracking
+            chain_id: network_details.cached_provider.chain.id(),
             project_path: project_path.to_path_buf(),
             start_block,
             end_block,
