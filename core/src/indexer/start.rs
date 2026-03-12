@@ -14,7 +14,6 @@ use tracing::{error, info};
 
 use crate::database::clickhouse::client::{ClickhouseClient, ClickhouseConnectionError};
 use crate::event::config::{ContractEventProcessingConfig, FactoryEventProcessingConfig};
-use crate::events::RindexerEventEmitter;
 use crate::helpers::format_duration;
 use crate::indexer::native_transfer::native_transfer_block_processor;
 use crate::indexer::Indexer;
@@ -38,7 +37,7 @@ use crate::{
     },
     manifest::core::Manifest,
     provider::{JsonRpcCachedProvider, ProviderError},
-    PostgresClient, RindexerEvent,
+    PostgresClient,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -545,8 +544,8 @@ pub async fn start_historical_indexing(
     dependencies: &[ContractEventDependencies],
     registry: Arc<EventCallbackRegistry>,
     trace_registry: Arc<TraceCallbackRegistry>,
-    event_emitter: Option<RindexerEventEmitter>,
     cancel_token: CancellationToken,
+    progress: Arc<IndexingEventsProgressState>,
 ) -> Result<Vec<ProcessedNetworkContract>, StartIndexingError> {
     info!("Historical indexing started");
 
@@ -560,17 +559,13 @@ pub async fn start_historical_indexing(
         registry,
         trace_registry,
         cancel_token,
-        event_emitter.clone(),
+        progress,
     )
     .await?;
 
     let duration = start.elapsed();
 
     info!("Historical indexing completed - time taken: {}", format_duration(duration));
-
-    if let Some(ref emitter) = event_emitter {
-        emitter.emit(RindexerEvent::HistoricalIndexingCompleted);
-    }
 
     Ok(result)
 }
@@ -582,7 +577,7 @@ pub async fn start_live_indexing(
     registry: Arc<EventCallbackRegistry>,
     trace_registry: Arc<TraceCallbackRegistry>,
     cancel_token: CancellationToken,
-    event_emitter: Option<RindexerEventEmitter>,
+    progress: Arc<IndexingEventsProgressState>,
 ) -> Result<Vec<ProcessedNetworkContract>, StartIndexingError> {
     info!("Live indexing started");
 
@@ -594,7 +589,7 @@ pub async fn start_live_indexing(
         registry,
         trace_registry,
         cancel_token,
-        event_emitter,
+        progress,
     )
     .await
 }
@@ -607,7 +602,7 @@ async fn start_indexing(
     registry: Arc<EventCallbackRegistry>,
     trace_registry: Arc<TraceCallbackRegistry>,
     cancel_token: CancellationToken,
-    event_emitter: Option<RindexerEventEmitter>,
+    progress: Arc<IndexingEventsProgressState>,
 ) -> Result<Vec<ProcessedNetworkContract>, StartIndexingError> {
     let database = initialize_database(manifest).await?;
     let clickhouse = initialize_clickhouse(manifest).await?;
@@ -616,13 +611,6 @@ async fn start_indexing(
     let mut non_blocking_process_events = Vec::new();
 
     let indexer = manifest.to_indexer();
-
-    let progress = IndexingEventsProgressState::monitor(
-        &registry.events,
-        &trace_registry.events,
-        event_emitter,
-    )
-    .await;
 
     // Start the sub-indexers concurrently to ensure fast startup times
     let (trace_indexer_handles, contract_events_indexer) = join!(

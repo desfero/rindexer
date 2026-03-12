@@ -510,8 +510,8 @@ mod tests {
 
     #[test]
     fn test_trace_progress_uses_first_event_id_per_network() {
-        let mut events = Vec::new();
-        let mut block_networks = HashMap::new();
+        let mut events: Vec<IndexingEventProgress> = Vec::new();
+        let mut block_networks: HashMap<u64, NetworkBlockProgress> = HashMap::new();
         let processor_id = "event_a".to_string();
 
         let network_progress = block_networks.entry(1).or_insert_with(|| NetworkBlockProgress {
