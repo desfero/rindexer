@@ -1,0 +1,25 @@
+core/src/indexer/start.rs
+  199fa584711b8b03 169,598
+core/src/indexer/progress.rs
+  199fa584711b8b03 287
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "2c326294101012b8dcdcd057294ea0917d283ba2",
+  "prompts": {
+    "199fa584711b8b03": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "47e8fc8b-154d-459c-944f-060748a11d8d",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Paweł Lula <desfero@users.noreply.github.com>",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 1,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    }
+  }
+}
