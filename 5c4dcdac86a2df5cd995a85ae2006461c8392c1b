@@ -1,0 +1,25 @@
+documentation/docs/pages/docs/start-building/rust-project-deep-dive/indexers.mdx
+  199fa584711b8b03 1199,1202
+documentation/docs/pages/docs/changelog.mdx
+  199fa584711b8b03 13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "5c4dcdac86a2df5cd995a85ae2006461c8392c1b",
+  "prompts": {
+    "199fa584711b8b03": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "47e8fc8b-154d-459c-944f-060748a11d8d",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Paweł Lula <desfero@users.noreply.github.com>",
+      "messages": [],
+      "total_additions": 29,
+      "total_deletions": 1,
+      "accepted_lines": 4,
+      "overriden_lines": 1
+    }
+  }
+}
