@@ -1,0 +1,23 @@
+core/src/indexer/progress.rs
+  c9163ed70ca28593 105,116,255,277-278,280-284,296,308,313-316,318,324,326-327,332-333,338-350,352-353,356-358,365-368,370,374,376-380,398,520-521,536,564
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "5f8f2a1c9a033a2a51e13ef7d2bd6374da63f23b",
+  "prompts": {
+    "c9163ed70ca28593": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fbb521af-56f5-40ba-8a66-1bccc442563f",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Paweł Lula <desfero@users.noreply.github.com>",
+      "messages": [],
+      "total_additions": 97,
+      "total_deletions": 91,
+      "accepted_lines": 57,
+      "overriden_lines": 4
+    }
+  }
+}
