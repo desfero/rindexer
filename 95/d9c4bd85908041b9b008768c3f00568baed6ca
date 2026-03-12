@@ -1,0 +1,85 @@
+core/src/start.rs
+  61cfba4f7faea88c 269-276,281,283,296-326,354-361
+core/src/indexer/start.rs
+  61cfba4f7faea88c 41,178,300
+  b0589b6e7b7d69cf 256,336,375,395,447,480,637,649
+core/src/indexer/progress.rs
+  91c2dfbb00e49ab7 60,147,155-156,158,198,210-211,243-244,250-253,261,288,293,312-314,324-328,436,438,459-461,482-484,516,545
+  27bd028e9478985a 16,23-32,73,120,179,181-186,193-197,206,209,213-215,218,222,294-295,297,309,359-369,422-428,432-433,439-441,444-451,455,458,463,467-474,478-479,481,511-512,515,517-519,521-534,536-544
+  b0589b6e7b7d69cf 2-3,48-49,77-78,89-110,112-115,122,148-154,180,199-205,207-208,254-260,262-265,268,270-281,353-355,370-371,374-375,377,401-408,412-413,421,464-465
+  1bc5e3fbdcd806d9 118,237-238,266-267,269,282-287,289-292,329,356-358,372-373,376,378-400,409-411,414-420,429-431,434-435,437,442-443,452-454,456-457,462,466,475-477,480,485-510,513-514,520,535
+core/src/event/config.rs
+  1bc5e3fbdcd806d9 228
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "95d9c4bd85908041b9b008768c3f00568baed6ca",
+  "prompts": {
+    "1bc5e3fbdcd806d9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "aabdcd84-028a-4816-b509-7538a6a1ee90",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Paweł Lula <desfero@users.noreply.github.com>",
+      "messages": [],
+      "total_additions": 153,
+      "total_deletions": 234,
+      "accepted_lines": 106,
+      "overriden_lines": 0
+    },
+    "27bd028e9478985a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019cdcd4-23e0-7af2-a41b-88d259736dce",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Paweł Lula <desfero@users.noreply.github.com>",
+      "messages": [],
+      "total_additions": 254,
+      "total_deletions": 212,
+      "accepted_lines": 110,
+      "overriden_lines": 0
+    },
+    "61cfba4f7faea88c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a2357f28-51be-484e-8acf-ebf51e05532c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Paweł Lula <desfero@users.noreply.github.com>",
+      "messages": [],
+      "total_additions": 27,
+      "total_deletions": 25,
+      "accepted_lines": 52,
+      "overriden_lines": 0
+    },
+    "91c2dfbb00e49ab7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019cdc6c-72c3-78b0-8080-67bf3a650b26",
+        "model": "gpt-5.4"
+      },
+      "human_author": "Paweł Lula <desfero@users.noreply.github.com>",
+      "messages": [],
+      "total_additions": 224,
+      "total_deletions": 167,
+      "accepted_lines": 35,
+      "overriden_lines": 0
+    },
+    "b0589b6e7b7d69cf": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a040a121-174d-4ecb-a296-c84e130f86c6",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Paweł Lula <desfero@users.noreply.github.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 103,
+      "overriden_lines": 0
+    }
+  }
+}
